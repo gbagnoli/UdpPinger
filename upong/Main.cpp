@@ -10,14 +10,14 @@
 #include <thread>
 #include <gflags/gflags.h>
 #include <chrono>
-#include <folly/ThreadName.h>
-#include <thrift/concurrency/PosixThreadFactory.h>
+#include <folly/system/ThreadName.h>
+/* #include <thrift/concurrency/PosixThreadFactory.h> */
 
 #include "NoradTargetThread.h"
 
 using namespace std;
 using namespace facebook::netnorad;
-using namespace apache::thrift::concurrency;
+/* using namespace apache::thrift::concurrency; */
 
 // Define commandline args
 DEFINE_int32(num_netnorad_threads, 8,

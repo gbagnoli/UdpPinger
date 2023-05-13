@@ -7,6 +7,8 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
+#define FMT_HEADER_ONLY
+#include <fmt/format.h>
 #include "UdpPinger.h"
 
 #include <linux/filter.h>
@@ -16,15 +18,15 @@
 
 #include <chrono>
 #include <cmath>
-#include <thread>
 #include <future>
+#include <thread>
 
+#include <folly/String.h>
 #include <folly/gen/Base.h>
 #include <folly/gen/Core.h>
-#include <folly/stats/Histogram-defs.h>
-#include <folly/ThreadName.h>
-
-#include <folly/Logging.h>
+#include <folly/stats/Histogram.h>
+#include <folly/system/ThreadName.h>
+#include <glog/logging.h>
 
 using namespace std;
 using namespace folly;
@@ -221,7 +223,8 @@ int createRawSocket(bool isV4, int qos, int bufferSize) {
   };
 
   struct sock_fprog bpf = {
-      .len = sizeof(code) / sizeof(code[0]), .filter = code,
+      .len = sizeof(code) / sizeof(code[0]),
+      .filter = code,
   };
 
   if (::setsockopt(sock, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf)) < 0) {
@@ -319,7 +322,7 @@ createUdpSockets(EventBase *evb, bool isV4, int basePort, int portCount,
 
   return make_pair(sockets, missingPorts);
 }
-}
+} // namespace
 
 namespace facebook {
 namespace netnorad {
@@ -387,10 +390,10 @@ void UdpReceiver::run(int qos) {
 
   socketsAreBound_ = true;
 
-  receivingConsumer_ = NotificationQueue<ReceiveProbe>::Consumer::make([this](
-      ReceiveProbe && msg) noexcept {
-    consumeMessage(forward<ReceiveProbe>(msg));
-  });
+  receivingConsumer_ = NotificationQueue<ReceiveProbe>::Consumer::make(
+      [this](ReceiveProbe &&msg) noexcept {
+        consumeMessage(forward<ReceiveProbe>(msg));
+      });
   receivingConsumer_->startConsuming(&evb_, recvQueues_[receiverId_].get());
 
   // this will loop until stopped explicitly by an external caller
@@ -557,8 +560,8 @@ void UdpReceiver::consumeMessage(ReceiveProbe &&message) noexcept {
                       clusterHistogramsV6_);
     }
   } else {
-    FB_LOG_EVERY_MS(ERROR, 100) << "Received unexpected packet from "
-                                << address;
+    LOG_EVERY_N(ERROR, 100)
+        << "Received unexpected packet from " << address;
   }
 }
 
@@ -649,7 +652,7 @@ void UdpReceiver::onMessageAvailable(size_t len) noexcept {
   probe.rtt = recvTs - ntohl(probeBody.pingerSentTime) - adjTarget;
 
   // ucomment if needed for debugging purposes - log the RTT adjustments
-  FB_LOG_EVERY_MS(INFO, 1000) << folly::sformat(
+  LOG_EVERY_N(INFO, 1000) << fmt::format(
       "Measured RTT {} usec for addr {}, adjustement by pinger {}, adjustment "
       "by target {}",
       probe.rtt, addr.describe(), adjPinger, adjTarget);
@@ -658,8 +661,8 @@ void UdpReceiver::onMessageAvailable(size_t len) noexcept {
   try {
     cluster = ipToTargetMap_.at(addr.getIPAddress()).cluster;
   } catch (std::out_of_range const &e) {
-    FB_LOG_EVERY_MS(ERROR, 500) << "Response from unknown IP address "
-                                << addr.getIPAddress();
+    LOG_EVERY_N(ERROR, 500)
+        << "Response from unknown IP address " << addr.getIPAddress();
     return;
   }
 
@@ -750,23 +753,22 @@ void UdpSender::buildAddressMap() {
 }
 
 void UdpSender::prepareConsumer() {
-  sendingConsumer_ = NotificationQueue<UdpTestPlan>::Consumer::make([this](
-      UdpTestPlan && testPlan) noexcept {
+  sendingConsumer_ = NotificationQueue<UdpTestPlan>::Consumer::make(
+      [this](UdpTestPlan &&testPlan) noexcept {
+        // enqueue test-plans until we receive the signal to start probing
+        if (testPlan.numPackets != 0) {
+          testPlans_.push_back(std::move(testPlan));
+          return;
+        }
 
-    // enqueue test-plans until we receive the signal to start probing
-    if (testPlan.numPackets != 0) {
-      testPlans_.push_back(std::move(testPlan));
-      return;
-    }
+        sendingConsumer_->stopConsuming();
+        buildAddressMap();
+        pingAllTargets();
 
-    sendingConsumer_->stopConsuming();
-    buildAddressMap();
-    pingAllTargets();
-
-    evb_.runAfterDelay([this]() noexcept { evb_.terminateLoopSoon(); },
-                       config_.pinger_cooldown_time * 1000 /* in ms */
-                       );
-  });
+        evb_.runAfterDelay([this]() noexcept { evb_.terminateLoopSoon(); },
+                           config_.pinger_cooldown_time * 1000 /* in ms */
+        );
+      });
 }
 
 void UdpSender::pingAllTargets() {
@@ -848,8 +850,8 @@ void UdpSender::pingAllTargets() {
           if (errno == EAGAIN) {
             --tp.packetsSentV4;
           } else {
-            FB_LOG_EVERY_MS(ERROR, 1000) << "UdpSender: v4 write error '"
-                                         << errnoStr(errno) << "'";
+            LOG_EVERY_N(ERROR, 1000)
+                << "UdpSender: v4 write error '" << errnoStr(errno) << "'";
             sendFailed++;
           }
         } else {
@@ -893,12 +895,12 @@ void UdpSender::pingAllTargets() {
           // if we can try again, de-count the packet, so we can
           // retry sending later
           if (errno == EAGAIN) {
-            FB_LOG_EVERY_MS(INFO, 1000) << "EAGAIN in v6 sendto";
+            LOG_EVERY_N(INFO, 1000) << "EAGAIN in v6 sendto";
             --tp.packetsSentV6;
           } else {
             sendFailed++;
-            FB_LOG_EVERY_MS(ERROR, 1000) << "UdpSender: v6 write error '"
-                                         << errnoStr(errno) << "'";
+            LOG_EVERY_N(ERROR, 1000)
+                << "UdpSender: v6 write error '" << errnoStr(errno) << "'";
           }
         } else {
           packetsSent++;
@@ -923,7 +925,7 @@ void UdpSender::pingAllTargets() {
     // the pps we achieved in this sweep
     double pps = std::ceil((1000000.0 / elapsed.count()) * packetsSent);
 
-    FB_LOG_EVERY_MS(INFO, 1000)
+    LOG_EVERY_N(INFO, 1000)
         << "Ping sweep took: " << elapsed.count() << " usec, sent "
         << packetsSent << " packets, pps was " << pps << " target pps is "
         << config_.pinger_rate / numSenders_;
@@ -934,8 +936,8 @@ void UdpSender::pingAllTargets() {
                                config_.pinger_rate);
       auto delayUsec =
           std::chrono::microseconds(folly::to<int64_t>(delay)) - elapsed;
-      FB_LOG_EVERY_MS(INFO, 1000) << "Sleeping for " << delayUsec.count()
-                                  << " usecs";
+      LOG_EVERY_N(INFO, 1000)
+          << "Sleeping for " << delayUsec.count() << " usecs";
       /* sleep override */
       std::this_thread::sleep_for(delayUsec);
     }
@@ -987,12 +989,11 @@ UdpTestResults UdpPinger::run(const vector<UdpTestPlan> &testPlans, int qos) {
       config_.socket_buffer_size /* buff size */, nullptr /* cob */);
 
   if (missingPortsV4.size()) {
-    LOG(WARNING) << "IPv4: could not bind UDP ports "
-                 << sformat(join(",", from(missingPortsV4) |
-                                          mapped([](int port) {
-                                            return to<string>(port);
-                                          }) |
-                                          as<vector>()));
+    LOG(WARNING) << "IPv4: could not bind UDP ports ";
+                 /* << fmt::format( */
+                 /*        fmt::join(",", from(missingPortsV4) | mapped([](int port) { */
+                 /*                    return to<string>(port); */
+                 /*                  }) | as<vector>())); */
   }
 
   tie(_socketsV6, missingPortsV6) = createUdpSockets(
@@ -1000,12 +1001,11 @@ UdpTestResults UdpPinger::run(const vector<UdpTestPlan> &testPlans, int qos) {
       config_.socket_buffer_size /* buff size */, nullptr /* cob */);
 
   if (missingPortsV6.size()) {
-    LOG(WARNING) << "IPv6: could not bind UDP ports "
-                 << sformat(join(",", from(missingPortsV6) |
-                                          mapped([](int port) {
-                                            return to<string>(port);
-                                          }) |
-                                          as<vector>()));
+    LOG(WARNING) << "IPv6: could not bind UDP ports ";
+                 /* << fmt::format( */
+                 /*        fmt::join(",", from(missingPortsV6) | mapped([](int port) { */
+                 /*                    return to<string>(port); */
+                 /*                  }) | as<vector>())); */
   }
 
   //
@@ -1023,7 +1023,7 @@ UdpTestResults UdpPinger::run(const vector<UdpTestPlan> &testPlans, int qos) {
         missingPortsV4, missingPortsV6, sendingQueues[i]);
     senderThreads.emplace_back(thread([sender, i] {
       pinToCore(i /* senderId */ + (::sysconf(_SC_NPROCESSORS_ONLN) / 2));
-      folly::setThreadName(folly::sformat("UdpPinger-Sender-{}", i));
+      folly::setThreadName(fmt::format("UdpPinger-Sender-{}", i));
       sender->run();
     }));
   }
@@ -1076,7 +1076,7 @@ UdpTestResults UdpPinger::run(const vector<UdpTestPlan> &testPlans, int qos) {
         clusterToClusterTypeMap));
     recvThreads.emplace_back(thread([i, receivers, qos] {
       pinToCore(i /* receiverId */);
-      folly::setThreadName(folly::sformat("UdpPinger-Receiver-{}", i));
+      folly::setThreadName(fmt::format("UdpPinger-Receiver-{}", i));
       receivers[i]->run(qos);
     }));
 
@@ -1126,8 +1126,8 @@ UdpTestResults UdpPinger::run(const vector<UdpTestPlan> &testPlans, int qos) {
       auto clusterPod =
           clusterPodJoin(testPlan.target.cluster, testPlan.target.pod);
       clusterPodProbeCountV4[clusterPod] += testPlan.numPackets;
-      clusterPodRackProbeCountV4[clusterPod][clusterPod + ":" +
-                                             testPlan.target.rack] +=
+      clusterPodRackProbeCountV4[clusterPod]
+                                [clusterPod + ":" + testPlan.target.rack] +=
           testPlan.numPackets;
       count += testPlan.numPackets;
     }
@@ -1136,8 +1136,8 @@ UdpTestResults UdpPinger::run(const vector<UdpTestPlan> &testPlans, int qos) {
       auto clusterPod =
           clusterPodJoin(testPlan.target.cluster, testPlan.target.pod);
       clusterPodProbeCountV6[clusterPod] += testPlan.numPackets;
-      clusterPodRackProbeCountV6[clusterPod][clusterPod + ":" +
-                                             testPlan.target.rack] +=
+      clusterPodRackProbeCountV6[clusterPod]
+                                [clusterPod + ":" + testPlan.target.rack] +=
           testPlan.numPackets;
       count += testPlan.numPackets;
     }
@@ -1435,5 +1435,5 @@ UdpTestResults UdpPinger::run(const vector<UdpTestPlan> &testPlans, int qos) {
 
   return results;
 }
-}
-}
+} // namespace netnorad
+} // namespace facebook

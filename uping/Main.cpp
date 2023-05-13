@@ -9,6 +9,7 @@
 
 #include <fstream>
 #include <thread>
+#include <iostream>
 #include <gflags/gflags.h>
 
 #include <sys/types.h>

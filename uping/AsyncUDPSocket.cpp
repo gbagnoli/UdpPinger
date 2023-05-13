@@ -103,12 +103,12 @@ void AsyncUDPSocket::bind(const folly::SocketAddress &address) {
   ownership_ = FDOwnership::OWNS;
 
   // attach to EventHandler
-  EventHandler::changeHandlerFD(fd_);
+  EventHandler::changeHandlerFD(folly::NetworkSocket::fromFd(fd_));
 
   if (address.getPort() != 0) {
     localAddress_ = address;
   } else {
-    localAddress_.setFromLocalAddress(fd_);
+    localAddress_.setFromLocalAddress(folly::NetworkSocket::fromFd(fd_));
   }
 }
 
@@ -118,8 +118,8 @@ void AsyncUDPSocket::setFD(int fd, FDOwnership ownership) {
   fd_ = fd;
   ownership_ = ownership;
 
-  EventHandler::changeHandlerFD(fd_);
-  localAddress_.setFromLocalAddress(fd_);
+  EventHandler::changeHandlerFD(folly::NetworkSocket::fromFd(fd_));
+  localAddress_.setFromLocalAddress(folly::NetworkSocket::fromFd(fd_));
 }
 
 ssize_t AsyncUDPSocket::write(const folly::SocketAddress &address,
@@ -129,7 +129,7 @@ ssize_t AsyncUDPSocket::write(const folly::SocketAddress &address,
   //   buffers less than 16, which is the highest I can think of
   //   for a real use case.
   iovec vec[16];
-  size_t iovec_len = buf->fillIov(vec, sizeof(vec) / sizeof(vec[0]));
+  size_t iovec_len = buf->fillIov(vec, sizeof(vec) / sizeof(vec[0])).totalLength;
   if (UNLIKELY(iovec_len == 0)) {
     buf->coalesce();
     vec[0].iov_base = const_cast<uint8_t *>(buf->data());

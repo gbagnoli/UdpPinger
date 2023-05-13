@@ -6,7 +6,6 @@
  * LICENSE file in the root directory of this source tree. An additional grant
  * of patent rights can be found in the PATENTS file in the same directory.
  */
-
 #include "NoradTargetThread.h"
 
 #include <chrono>
@@ -15,13 +14,15 @@
 #include <string>
 #include <utility>
 
+#define FMT_HEADER_ONLY
+#include <fmt/format.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
 #include <folly/Format.h>
 #include <folly/Memory.h>
-#include <folly/Logging.h>
+#include <glog/logging.h>
 
 // Due to the way kernel headers are included, this may or may not be defined.
 // Number pulled from 3.10 kernel headers.
@@ -199,7 +200,7 @@ void NoradTargetReceiverThread::receiveProbe(NoradProbe *probe) {
     probe->probeBody.targetRcvdTime =
         htonl(stamp->tv_sec * 1000000 + stamp->tv_nsec / 1000);
   } else {
-    FB_LOG_EVERY_MS(INFO, 1000) << "Kernel timestamp not available";
+    LOG_EVERY_N(INFO, 1000) << "Kernel timestamp not available";
 
     // use system time to approximate
     probe->probeBody.targetRcvdTime =
@@ -252,7 +253,7 @@ void NoradTargetSenderThread::echoProbe(NoradProbe *probe) {
 
   probe->probeBody.targetRespTime = htonl(now);
 
-  FB_LOG_EVERY_MS(INFO, 1000) << folly::sformat(
+  LOG_EVERY_N(INFO, 1000) << fmt::format(
       "Probe originated at {}, received at {} responded at {}, adjusted by {}",
       ntohl(probe->probeBody.pingerSentTime),
       ntohl(probe->probeBody.targetRcvdTime),
