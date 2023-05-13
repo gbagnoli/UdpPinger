@@ -1,8 +1,8 @@
-CPPFLAGS=-std=c++11
+CPPFLAGS=-I/tmp/fbcode_builder_getdeps-ZhomeZgiacomoZworkspaceZfollyZbuildZfbcode_builder/installed/folly/include
 THRIFT_GEN+= -Igen-cpp
 CPP=g++
-LDFLAGS=-g $(THRIFT_GEN)
-LDLIBS=-lfolly -lgflags -lpthread -lglog
+LDFLAGS=-g $(THRIFT_GEN) -L/tmp/fbcode_builder_getdeps-ZhomeZgiacomoZworkspaceZfollyZbuildZfbcode_builder/installed/folly/lib
+LDLIBS=-lfolly -lgflags -lpthread -lglog -ldouble-conversion
 THRIFT=thrift
 
 all: upong
